@@ -75,16 +75,16 @@ class BiaffineParser(nn.Module):
         embed = torch.cat(embeds, dim=-1)
 
         # lstm
-        # sorted_lens, indices = torch.sort(lens, descending=True)
-        # inverse_indics = indices.argsort()
-        # x = pack_padded_sequence(embed[indices], sorted_lens, True)
-        # x = self.lstm(x)[-1]
-        # x, _ = pad_packed_sequence(x, True)
-        # x = self.lstm_dropout(x)[inverse_indics]
-        x = pack_padded_sequence(embed, lens, True, False)
-        x, _ = self.lstm(x)
-        x, _ = pad_packed_sequence(x, True, total_length=seq_len)
-        x = self.lstm_dropout(x)
+        sorted_lens, indices = torch.sort(lens, descending=True)
+        inverse_indics = indices.argsort()
+        x = pack_padded_sequence(embed[indices], sorted_lens, True)
+        x = self.lstm(x)[-1]
+        x, _ = pad_packed_sequence(x, True)
+        x = self.lstm_dropout(x)[inverse_indics]
+        # x = pack_padded_sequence(embed, lens, True, False)
+        # x, _ = self.lstm(x)
+        # x, _ = pad_packed_sequence(x, True, total_length=seq_len)
+        # x = self.lstm_dropout(x)
         # apply MLP to the BiLSTM output states
 
         arc_h = self.mlp_arc_h(x)
