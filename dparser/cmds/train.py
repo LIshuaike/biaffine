@@ -96,11 +96,11 @@ class Train():
         dl_dev = batchify(ds_dev, config.batch_size)
         dl_test = batchify(ds_test, config.batch_size)
         log(f"{'train:':6} {len(ds_train):5} sentences in total, "
-              f"{len(dl_train):3} batches provided")
+            f"{len(dl_train):3} batches provided")
         log(f"{'dev:':6} {len(ds_dev):5} sentences in total, "
-              f"{len(dl_dev):3} batches provided")
+            f"{len(dl_dev):3} batches provided")
         log(f"{'test:':6} {len(ds_test):5} sentences in total, "
-              f"{len(dl_test):3} batches provided")
+            f"{len(dl_test):3} batches provided")
 
         log("Create model")
         parser = BiaffineParser(config, vocab.embedding)
