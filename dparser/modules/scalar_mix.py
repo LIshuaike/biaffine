@@ -21,15 +21,15 @@ class ScalarMix(nn.Module):
         super().__init__()
 
         self.n_layers = n_layers
-        self.weithts = nn.Parameter(torch.zeros(n_layers))
+        self.weights = nn.Parameter(torch.zeros(n_layers))
         self.gamma = nn.Parameter(torch.tensor([1.0]))
         self.dropout = nn.Dropout(dropout)
-    
+
     def __repr__(self):
         s = f"n_layers={self.n_layers}"
         if self.dropout > 0:
             s += f", dropout={self.dropout.p}"
-        
+
         return f"{self.__class__.__name__}{s}"
 
     def forward(self, tensors):
