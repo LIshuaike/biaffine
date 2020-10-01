@@ -4,6 +4,11 @@ from dparser import Model, BiaffineParser
 from dparser.metrics import AttachmentMethod
 from dparser.utils import Corpus, Embedding, Vocab
 from dparser.utils.data import TextDataset, batchify
+from dparser.utils.log import log
+
+import torch.distributed as dist
+from dparser.utils.parallel import is_master
+from dparser.utils.parallel import DistributedDataParallel as DDP
 
 import torch
 from torch.optim import Adam
@@ -16,6 +21,11 @@ np.random.seed(0)
 class Train():
     def add_subparser(self, name, parser):
         subparser = parser.add_parser(name, help='Train a model')
+        subparser.add_argument('--feat',
+                               '-f',
+                               default='char',
+                               choices=['pos', 'char', 'bert'],
+                               help='choices of additional features')
         subparser.add_argument('--buckets',
                                default=64,
                                type=int,
@@ -36,6 +46,9 @@ class Train():
         subparser.add_argument('--fembed',
                                default='data/giga.100.txt',
                                help='path to pretrained embedding file')
+        subparser.add_argument('--bert',
+                               default='bert-base-chinese',
+                               help='which bert model to use')
         subparser.add_argument('--patience',
                                default=100,
                                type=int,
@@ -47,16 +60,19 @@ class Train():
 
     def __call__(self, config):
 
+        if dist.is_initialized():
+            config.batch_size = config.batch_size // dist.get_world_size()
+
         train = Corpus.load(config.ftrain)
         dev = Corpus.load(config.fdev)
         test = Corpus.load(config.ftest)
         if config.preprocess or not os.path.exists(config.vocab):
-            print('Preprocess the data')
+            log('Preprocess the data')
             vocab = Vocab.from_corpus(corpus=train, min_freq=2)
             vocab.load_embedding(Embedding.load(config.fembed, config.unk))
             torch.save(vocab, config.vocab)
         else:
-            print('load vocabulary')
+            log('load vocabulary')
             vocab = torch.load(config.vocab)
 
         config.update({
@@ -67,28 +83,33 @@ class Train():
             'pad_index': vocab.pad_index,
             'unk_index': vocab.unk_index
         })
-        print(vocab)
+        log(vocab)
 
-        print('Load the dataset')
+        log('Load the dataset')
         ds_train = TextDataset(vocab.numericalize(train), config.buckets)
         ds_dev = TextDataset(vocab.numericalize(dev), config.buckets)
         ds_test = TextDataset(vocab.numericalize(test), config.buckets)
 
         # set data loaders
-        dl_train = batchify(ds_train, config.batch_size)
+        dl_train = batchify(ds_train, config.batch_size, True,
+                            dist.is_initialized())
         dl_dev = batchify(ds_dev, config.batch_size)
         dl_test = batchify(ds_test, config.batch_size)
-        print(f"{'train:':6} {len(ds_train):5} sentences in total, "
+        log(f"{'train:':6} {len(ds_train):5} sentences in total, "
               f"{len(dl_train):3} batches provided")
-        print(f"{'dev:':6} {len(ds_dev):5} sentences in total, "
+        log(f"{'dev:':6} {len(ds_dev):5} sentences in total, "
               f"{len(dl_dev):3} batches provided")
-        print(f"{'test:':6} {len(ds_test):5} sentences in total, "
+        log(f"{'test:':6} {len(ds_test):5} sentences in total, "
               f"{len(dl_test):3} batches provided")
 
-        print("Create model")
+        log("Create model")
         parser = BiaffineParser(config, vocab.embedding)
         parser.to(config.device)
-        print(f'{parser}\n')
+        if dist.is_initialized():
+            parser = DDP(parser,
+                         device_ids=[config.local_rank],
+                         find_unused_parameters=True)
+        log(f'{parser}\n')
 
         model = Model(config, vocab, parser)
 
@@ -102,33 +123,34 @@ class Train():
         for epoch in range(1, config.epochs + 1):
             start = datetime.now()
             model.train(dl_train)
-            print(f"Epoch {epoch} / {config.epochs}:")
+            log(f"Epoch {epoch} / {config.epochs}:")
             loss, metric_p = model.evaluate(dl_train, config.punct)
-            print(f"{'train:':6} Loss: {loss:.4f} {metric_p}")
+            log(f"{'train:':6} Loss: {loss:.4f} {metric_p}")
             loss, dev_metric_p = model.evaluate(dl_dev,
                                                 config.punct,
                                                 partial=True)
-            print(f"{'dev:':6} Loss: {loss:.4f}  {dev_metric_p}")
+            log(f"{'dev:':6} Loss: {loss:.4f}  {dev_metric_p}")
             loss, metric_p = model.evaluate(dl_test,
                                             config.punct,
                                             partial=True)
-            print(f"{'test:':6} Loss: {loss:.4f} {metric_p}")
+            log(f"{'test:':6} Loss: {loss:.4f} {metric_p}")
 
             t = datetime.now() - start
             # save the model if it is the best so far
             if dev_metric_p > best_metric and epoch > 10:
                 best_e, best_metric = epoch, dev_metric_p
-                model.parser.save(config.model)
-                print(f"{t}s elapsed (saved)\n")
+                if is_master():
+                    model.parser.save(config.model)
+                log(f"{t}s elapsed (saved)\n")
             else:
-                print(f"{t}s elapsed\n")
+                log(f"{t}s elapsed\n")
             total_time += t
             if epoch - best_e >= config.patience:
                 break
         model.parser = BiaffineParser.load(config.model)
         loss, metirc_p = model.evaluate(dl_test, config.punct, partial=True)
 
-        print(f"max score of dev is {best_metric.score:.2%} at epoch {best_e}")
-        print(f"the score of test at epoch {best_e} is {metric_p.score:.2%}")
-        print(f"average time of each epoch is {total_time / epoch}s")
-        print(f"{total_time}s elapsed")
+        log(f"max score of dev is {best_metric.score:.2%} at epoch {best_e}")
+        log(f"the score of test at epoch {best_e} is {metric_p.score:.2%}")
+        log(f"average time of each epoch is {total_time / epoch}s")
+        log(f"{total_time}s elapsed")

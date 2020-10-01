@@ -1,6 +1,7 @@
 # -*- encoding: utf-8 -*-
 
 import torch
+import torch.distributed as dist
 from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data import DataLoader, Dataset, Sampler
 
@@ -68,29 +69,60 @@ def collate_fn(data):
 
 
 class TextSampler(Sampler):
-    def __init__(self, buckets, batch_size, shuffle=False, max_len=800):
+    def __init__(self,
+                 buckets,
+                 batch_size,
+                 shuffle=False,
+                 max_len=800,
+                 distributed=False):
         self.batch_size = batch_size
         self.shuffle = shuffle
         self.sizes, self.buckets = zip(*[(size, bucket)
                                          for size, bucket in buckets.items()])
         # number of chunks in each bucket
+        # self.chunks = [
+        #     max(round(size * len(bucket) / min(max_len * size, batch_size)), 1)
+        #     for size, bucket in zip(self.sizes, self.buckets)
+        # ]
+
+        # number of chunks in each bucket, clipped by range(1, len(bucket))
         self.chunks = [
-            max(round(size * len(bucket) / min(max_len * size, batch_size)), 1)
+            min(len(bucket), max(round(size * len(bucket) / batch_size), 1))
             for size, bucket in zip(self.sizes, self.buckets)
         ]
+        self.rank = dist.get_rank() if distributed else 0
+        self.replicas = dist.get_world_size() if distributed else 1
+        self.samples = sum(self.chunks) // self.replicas
+        self.epoch = 0
 
     def __iter__(self):
+        g = torch.Generator()
+        g.manual_seed(self.epoch)
+        range_fn = torch.arange
         # if shuffle, shffule both the buckets and samples in each bucket
-        range_fn = torch.randperm if self.shuffle else torch.arange
+        # for distributed trainign, mask sure ezch process geratates the same random sequence at each epoch
+        if self.shuffle:
+
+            def range_fn(x):
+                return torch.randperm(x, generator=g)
+
+        total, count = 0, 0
+        # TODO: more elegant way to deal with uneven data, which we directly discard right now
         for i in range_fn(len(self.buckets)).tolist():
             split_sizes = [(len(self.buckets[i]) - j - 1) // self.chunks[i] + 1
                            for j in range(self.chunks[i])]
             # DON'T use `torch.chunk` which may return wrong number of chunks
             for batch in range_fn(len(self.buckets[i])).split(split_sizes):
-                yield [self.buckets[i][j] for j in batch.tolist()]
+                if count == self.samples:
+                    break
+                if total % self.replicas == self.rank:
+                    count += 1
+                    yield [self.buckets[i][j] for j in batch.tolist()]
+                total += 1
+        self.epoch += 1
 
     def __len__(self):
-        return sum(self.chunks)
+        return self.samples
 
 
 class TextDataset(Dataset):
@@ -113,10 +145,11 @@ class TextDataset(Dataset):
         return dict(zip(self.centroids, self.clusters))
 
 
-def batchify(dataset, batch_size, shuffle=False):
+def batchify(dataset, batch_size, shuffle=False, distributed=False):
     batch_sampler = TextSampler(buckets=dataset.buckets,
                                 batch_size=batch_size,
-                                shuffle=shuffle)
+                                shuffle=shuffle,
+                                distributed=distributed)
     loader = DataLoader(dataset=dataset,
                         batch_sampler=batch_sampler,
                         collate_fn=collate_fn)

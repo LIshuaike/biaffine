@@ -1,4 +1,4 @@
-from dparser.modules import CHAR_LSTM, MLP, Biaffine, BiLSTM, IndependentDropout, SharedDropout, ScalarMix
+from dparser.modules import CHAR_LSTM, MLP, Biaffine, BiLSTM, IndependentDropout, SharedDropout, BertEmbedding
 from dparser.utils.decoder import mst, eisner
 
 import torch
@@ -11,13 +11,24 @@ class BiaffineParser(nn.Module):
         super(BiaffineParser, self).__init__()
 
         self.config = config
+        feat = config.feat
         # input layer(embedding layer and char LSTM layer)
         self.pretrained = nn.Embedding.from_pretrained(embed)
         self.word_embed = nn.Embedding(num_embeddings=config.n_words,
                                        embedding_dim=config.n_embed)
-        self.char_lstm = CHAR_LSTM(num_embeddings=config.n_chars,
-                                   embedding_dim=config.n_char_embed,
-                                   output_dim=config.n_embed)
+        if feat == 'char':
+            self.feat_embed = CHAR_LSTM(num_embeddings=config.n_chars,
+                                        embedding_dim=config.n_char_embed,
+                                        output_dim=config.n_embed)
+        elif feat == 'bert':
+            self.feat_embed = BertEmbedding(model=config.bert,
+                                            n_layers=config.n_bert_layers,
+                                            n_out=config.n_bert_embed,
+                                            pad_index=0)
+            self.config.n_feat_embed = self.feat_embed.n_out
+        elif feat == 'pos':
+            self.feat_embed = nn.Embedding(num_embeddings=config.n_tags,
+                                           embedding_dim=config.n_pos_embed)
         self.embed_dropout = IndependentDropout(p=config.embed_dropout)
 
         # LSTM layer
@@ -59,7 +70,7 @@ class BiaffineParser(nn.Module):
     def reset_parameters(self):
         nn.init.zeros_(self.word_embed.weight)
 
-    def forward(self, words, chars):
+    def forward(self, words, feats):
         batch_size, seq_len = words.shape
         mask = words.ne(self.pad_index)
         lens = mask.sum(dim=1)
@@ -69,9 +80,8 @@ class BiaffineParser(nn.Module):
 
         #get outputs from embedding layer
         word_embed = self.pretrained(words) + self.word_embed(ext_words)
-        char_embed = self.char_lstm(chars[mask])
-        char_embed = pad_sequence(torch.split(char_embed, lens.tolist()), True)
-        embeds = self.embed_dropout(word_embed, char_embed)
+        feat_embed = self.feat_embed(feats)
+        embeds = self.embed_dropout(word_embed, feat_embed)
         embed = torch.cat(embeds, dim=-1)
 
         # lstm
@@ -81,10 +91,6 @@ class BiaffineParser(nn.Module):
         x = self.lstm(x)[-1]
         x, _ = pad_packed_sequence(x, True)
         x = self.lstm_dropout(x)[inverse_indics]
-        # x = pack_padded_sequence(embed, lens, True, False)
-        # x, _ = self.lstm(x)
-        # x, _ = pad_packed_sequence(x, True, total_length=seq_len)
-        # x = self.lstm_dropout(x)
         # apply MLP to the BiLSTM output states
 
         arc_h = self.mlp_arc_h(x)
@@ -119,11 +125,33 @@ class BiaffineParser(nn.Module):
         }
         torch.save(state, fp)
 
-    def get_loss(self, s_arc, s_rel, gold_arcs, gold_rels):
-        s_rel = s_rel[torch.arange(len(s_rel)), gold_arcs]
+    def get_loss(self, s_arc, s_rel, arcs, rels, mask, partial=False):
+        r"""
+        Args:
+            s_arc (~torch.Tensor): ``[batch_size, seq_len, seq_len]``.
+                Scores of all possible arcs.
+            s_rel (~torch.Tensor): ``[batch_size, seq_len, seq_len, n_labels]``.
+                Scores of all possible labels on each arc.
+            arcs (~torch.LongTensor): ``[batch_size, seq_len]``.
+                The tensor of gold-standard arcs.
+            rels (~torch.LongTensor): ``[batch_size, seq_len]``.
+                The tensor of gold-standard labels.
+            mask (~torch.BoolTensor): ``[batch_size, seq_len]``.
+                The mask for covering the unpadded tokens.
+            partial (bool):
+                ``True`` denotes the trees are partially annotated. Default: ``False``.
+        Returns:
+            ~torch.Tensor:
+                The training loss.
+        """
+        if partial:
+            mask = mask & arcs.ge(0)
+        s_arc, s_rel = s_arc[mask], s_rel[mask]
+        arcs, rels = arcs[mask], rels[mask]
+        s_rel = s_rel[torch.arange(len(s_rel)), arcs]
 
-        arc_loss = self.criterion(s_arc, gold_arcs)
-        rel_loss = self.criterion(s_rel, gold_rels)
+        arc_loss = self.criterion(s_arc, arcs)
+        rel_loss = self.criterion(s_rel, rels)
         loss = arc_loss + rel_loss
 
         return loss

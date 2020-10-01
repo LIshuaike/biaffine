@@ -2,6 +2,9 @@ from dparser.metrics import AttachmentMethod
 
 import torch
 import torch.nn as nn
+import torch.distributed as dist
+from dparser.utils.parallel import is_master
+from dparser.utils.parallel import DistributedDataParallel as DDP
 
 
 class Model():
@@ -12,6 +15,7 @@ class Model():
         self.parser = parser
 
     def train(self, loader):
+
         self.parser.train()
 
         for i, (words, chars, tags, arcs, rels) in enumerate(loader):
@@ -19,10 +23,8 @@ class Model():
             # ignore the first token of each sentence
             mask[:, 0] = 0
             s_arc, s_rel = self.parser(words, chars)
-            s_arc, s_rel = s_arc[mask], s_rel[mask]
-            gold_arcs, gold_rels = arcs[mask], rels[mask]
 
-            loss = self.parser.get_loss(s_arc, s_rel, gold_arcs, gold_rels)
+            loss = self.parser.get_loss(s_arc, s_rel, arcs, rels, mask)
             loss = loss / self.config.update_steps
             loss.backward()
 
@@ -44,6 +46,12 @@ class Model():
             mask[:, 0] = 0
 
             s_arc, s_rel = self.parser(words, chars)
+            loss += self.parser.get_loss(s_arc,
+                                         s_rel,
+                                         arcs,
+                                         rels,
+                                         mask,
+                                         partial=partial)
             pred_arcs, pred_rels = self.parser.decode(s_arc, s_rel, mask)
 
             if partial:
@@ -52,13 +60,8 @@ class Model():
             if not punct:
                 puncts = words.new_tensor(self.vocab.puncts)
                 mask &= words.unsqueeze(-1).ne(puncts).all(-1)
-            
-            s_arc, s_rel = s_arc[mask], s_rel[mask]
-            gold_arcs, gold_rels = arcs[mask], rels[mask]
-            pred_arcs, pred_rels = pred_arcs[mask], pred_rels[mask]
 
-            loss += self.parser.get_loss(s_arc, s_rel, gold_arcs, gold_rels)
-            metirc(pred_arcs, pred_rels, gold_arcs, gold_rels)
+            metirc(pred_arcs, pred_rels, arcs, rels, mask)
         loss /= len(loader)
 
         return loss, metirc

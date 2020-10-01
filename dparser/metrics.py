@@ -30,13 +30,15 @@ class AttachmentMethod(Metric):
         self.corrent_arcs = 0
         self.corrent_rels = 0
 
-    def __call__(self, pred_arcs, pred_rels, gold_arcs, gold_rels):
-        arc_mask = pred_arcs.eq(gold_arcs)
+    def __call__(self, pred_arcs, pred_rels, gold_arcs, gold_rels, mask):
+        lens = mask.sum(1)
+        arc_mask = pred_arcs.eq(gold_arcs) & mask
         rel_mask = pred_rels.eq(gold_rels) & arc_mask
+        arc_mask_seq, rel_mask_seq = arc_mask[mask], rel_mask[mask]
 
-        self.total += len(arc_mask)
-        self.corrent_arcs += arc_mask.sum().item()
-        self.corrent_rels += rel_mask.sum().item()
+        self.total += len(arc_mask_seq)
+        self.corrent_arcs += arc_mask_seq.sum().item()
+        self.corrent_rels += rel_mask_seq.sum().item()
 
     def __repr__(self):
         return f'UAS:{self.uas:.2%} LAS:{self.las:.2%}'
