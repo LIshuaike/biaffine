@@ -78,8 +78,9 @@ class BiaffineParser(nn.Module):
         ext_mask = words.ge(self.word_embed.num_embeddings)
         ext_words = words.masked_fill(ext_mask, self.unk_index)
 
-        #get outputs from embedding layer
+        # get outputs from embedding layer
         word_embed = self.pretrained(words) + self.word_embed(ext_words)
+
         feat_embed = self.feat_embed(feats)
         embeds = self.embed_dropout(word_embed, feat_embed)
         embed = torch.cat(embeds, dim=-1)

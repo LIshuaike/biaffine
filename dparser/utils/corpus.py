@@ -6,7 +6,7 @@ Sentence = namedtuple('Sentencee', [
     'ID', 'FORM', 'LEMMA', 'CPOS', 'POS', 'FEATS', 'HEAD', 'DEPREL', 'PHEAD',
     'PDEPREL'
 ],
-                      defaults=[None] * 10)
+    defaults=[None] * 10)
 
 
 class Corpus():
@@ -45,7 +45,7 @@ class Corpus():
     @classmethod
     def load(cls, fp, columns=range(10)):
         sentences, columns = [], []
-        with open(fp, encoding='utf=8') as f:
+        with open(fp, encoding='utf-8') as f:
             for line in f:
                 line = line.strip()
                 if line == '':
@@ -62,22 +62,6 @@ class Corpus():
         corpus = cls(sentences)
 
         return corpus
-
-    # @classmethod
-    # def load(cls, fname, columns=range(10)):
-    #     start, sentences = 0, []
-    #     names = [Sentence._fields[col] for col in columns]
-    #     with open(fname, 'r', encoding='utf-8') as f:
-    #         lines = [line.strip() for line in f]
-    #     for i, line in enumerate(lines):
-    #         if not line:
-    #             values = zip(*[l.split() for l in lines[start:i]])
-    #             sentence = Sentence(**dict(zip(names, values)))
-    #             sentences.append(sentence)
-    #             start = i + 1
-    #     corpus = cls(sentences)
-
-    #     return corpus
 
     def save(self, fp):
         with open(fp, 'w', encoding='utf-8') as f:
