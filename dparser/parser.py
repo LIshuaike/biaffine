@@ -16,19 +16,16 @@ class BiaffineParser(nn.Module):
         self.pretrained = nn.Embedding.from_pretrained(embed)
         self.word_embed = nn.Embedding(num_embeddings=config.n_words,
                                        embedding_dim=config.n_embed)
-        if feat == 'char':
-            self.feat_embed = CHAR_LSTM(num_embeddings=config.n_chars,
-                                        embedding_dim=config.n_char_embed,
-                                        output_dim=config.n_embed)
-        elif feat == 'bert':
-            self.feat_embed = BertEmbedding(model=config.bert,
-                                            n_layers=config.n_bert_layers,
-                                            n_out=config.n_bert_embed,
-                                            pad_index=0)
-            self.config.n_feat_embed = self.feat_embed.n_out
-        elif feat == 'pos':
-            self.feat_embed = nn.Embedding(num_embeddings=config.n_tags,
-                                           embedding_dim=config.n_pos_embed)
+        self.char_embed = CHAR_LSTM(num_embeddings=config.n_chars,
+                                    embedding_dim=config.n_char_embed,
+                                    output_dim=config.n_embed)
+        self.bert_embed = BertEmbedding(model=config.bert,
+                                        n_layers=config.n_bert_layers,
+                                        n_out=config.n_feat_embed)
+        # config.n_feat_embed = self.feat_embed.n_out
+        # elif feat == 'pos':
+        #     self.feat_embed = nn.Embedding(num_embeddings=config.n_tags,
+        #                                    embedding_dim = config.n_pos_embed)
         self.embed_dropout = IndependentDropout(p=config.embed_dropout)
 
         # LSTM layer
@@ -63,6 +60,8 @@ class BiaffineParser(nn.Module):
 
         self.pad_index = config.pad_index
         self.unk_index = config.unk_index
+        self.bos_index = config.bos_index
+        self.eos_index = config.eos_index
         self.criterion = nn.CrossEntropyLoss()
 
         self.reset_parameters()
@@ -70,7 +69,7 @@ class BiaffineParser(nn.Module):
     def reset_parameters(self):
         nn.init.zeros_(self.word_embed.weight)
 
-    def forward(self, words, feats):
+    def forward(self, berts, words, chars):
         batch_size, seq_len = words.shape
         mask = words.ne(self.pad_index)
         lens = mask.sum(dim=1)
@@ -80,9 +79,9 @@ class BiaffineParser(nn.Module):
 
         # get outputs from embedding layer
         word_embed = self.pretrained(words) + self.word_embed(ext_words)
-
-        feat_embed = self.feat_embed(feats)
-        embeds = self.embed_dropout(word_embed, feat_embed)
+        word_embed = word_embed[:, :max(lens)] + self.bert_embed(*berts)
+        char_embed = self.feat_embed(chars)
+        embeds = self.embed_dropout(word_embed, char_embed)
         embed = torch.cat(embeds, dim=-1)
 
         # lstm
@@ -100,31 +99,14 @@ class BiaffineParser(nn.Module):
         rel_d = self.mlp_rel_d(x)
 
         # get arc and rel scores from the bilinear attention
-        #[batch_size, seq_len, seq_len]
+        # [batch_size, seq_len, seq_len]
         s_arc = self.attn_arc(arc_d, arc_h)
-        #[batch_size, seq_len, seq_len, n_rels]
+        # [batch_size, seq_len, seq_len, n_rels]
         s_rel = self.attn_rel(rel_d, rel_h).permute(0, 2, 3, 1)
         # set the scores that exceed the length of each sentence to -inf
         s_arc.masked_fill_(~mask.unsqueeze(1), float('-inf'))
 
         return s_arc, s_rel
-
-    @classmethod
-    def load(cls, fp):
-        device = 'cuda' if torch.cuda.is_available() else 'cpu'
-        state = torch.load(fp, map_location=device)
-        parser = cls(state['config'], state['embed'])
-        parser.load_state_dict(state['state_dict'])
-        parser.to(device)
-        return parser
-
-    def save(self, fp):
-        state = {
-            'config': self.config,
-            'embed': self.pretrained.weight,
-            'state_dict': self.state_dict()
-        }
-        torch.save(state, fp)
 
     def get_loss(self, s_arc, s_rel, arcs, rels, mask, partial=False):
         r"""
@@ -167,3 +149,20 @@ class BiaffineParser(nn.Module):
         pred_rels = s_rel.argmax(-1).gather(
             -1, pred_arcs.unsqueeze(-1)).squeeze(-1)
         return pred_arcs, pred_rels
+
+    @classmethod
+    def load(cls, fp):
+        device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        state = torch.load(fp, map_location=device)
+        parser = cls(state['config'], state['embed'])
+        parser.load_state_dict(state['state_dict'])
+        parser.to(device)
+        return parser
+
+    def save(self, fp):
+        state = {
+            'config': self.config,
+            'embed': self.pretrained.weight,
+            'state_dict': self.state_dict()
+        }
+        torch.save(state, fp)

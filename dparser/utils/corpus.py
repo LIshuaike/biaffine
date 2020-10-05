@@ -10,7 +10,6 @@ Sentence = namedtuple('Sentencee', [
 
 
 class Corpus():
-    root = '<ROOT>'
 
     def __init__(self, sentences):
         self.sentences = sentences
@@ -28,19 +27,19 @@ class Corpus():
 
     @property
     def words(self):
-        return [[self.root] + list(sentence.FORM) for sentence in self]
+        return [list(sentence.FORM) for sentence in self]
 
     @property
     def tags(self):
-        return [[self.root] + list(sentence.CPOS) for sentence in self]
+        return [list(sentence.CPOS) for sentence in self]
 
     @property
     def heads(self):
-        return [[0] + list(map(int, sentence.HEAD)) for sentence in self]
+        return [list(map(int, sentence.HEAD)) for sentence in self]
 
     @property
     def rels(self):
-        return [[self.root] + list(sentence.DEPREL) for sentence in self]
+        return [list(sentence.DEPREL) for sentence in self]
 
     @classmethod
     def load(cls, fp, columns=range(10)):
