@@ -5,6 +5,8 @@ import torch.distributed as dist
 from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data import DataLoader, Dataset, Sampler
 
+from collections.abc import Iterable
+
 
 def kmeans(x, k):
     r"""
@@ -60,14 +62,6 @@ def kmeans(x, k):
     return centroids, clusters
 
 
-def collate_fn(data):
-    reprs = (pad_sequence(i, True) for i in zip(*data))
-    if torch.cuda.is_available():
-        reprs = (i.cuda() for i in reprs)
-
-    return reprs
-
-
 class TextSampler(Sampler):
     def __init__(self,
                  buckets,
@@ -79,12 +73,6 @@ class TextSampler(Sampler):
         self.shuffle = shuffle
         self.sizes, self.buckets = zip(*[(size, bucket)
                                          for size, bucket in buckets.items()])
-        # number of chunks in each bucket
-        # self.chunks = [
-        #     max(round(size * len(bucket) / min(max_len * size, batch_size)), 1)
-        #     for size, bucket in zip(self.sizes, self.buckets)
-        # ]
-
         # number of chunks in each bucket, clipped by range(1, len(bucket))
         self.chunks = [
             min(len(bucket), max(round(size * len(bucket) / batch_size), 1))
@@ -143,6 +131,14 @@ class TextDataset(Dataset):
     @property
     def buckets(self):
         return dict(zip(self.centroids, self.clusters))
+
+
+def collate_fn(data):
+    reprs = (pad_sequence(i, True) for i in zip(*data))
+    if torch.cuda.is_available():
+        reprs = (i.cuda() for i in reprs)
+
+    return reprs
 
 
 def batchify(dataset, batch_size, shuffle=False, distributed=False):

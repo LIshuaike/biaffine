@@ -3,20 +3,27 @@
 import torch
 import unicodedata
 from collections import Counter
+from transformers import AutoTokenizer
 
 
 class Vocab():
-    pad = '<pad>'
-    unk = '<unk>'
+    pad = '<PAD>'
+    unk = '<UNK>'
+    bos = '<BOS>'
+    eos = '<EOS>'
 
-    def __init__(self, words, chars, tags, rels):
+    def __init__(self, bert_vocab, words, chars, tags, rels):
         self.pad_index = 0
         self.unk_index = 1
+        self.bos_index = 2
+        # self.eos_index = 3
 
-        self.words = [self.pad, self.unk] + sorted(words)
-        self.chars = [self.pad, self.unk] + sorted(chars)
-        self.tags = sorted(tags)
-        self.rels = sorted(rels)
+        self.tokenizer = AutoTokenizer.from_pretrained(bert_vocab)
+
+        self.words = [self.pad, self.unk, self.bos] + sorted(words)
+        self.chars = [self.pad, self.unk, self.bos] + sorted(chars)
+        self.tags = [self.bos] + sorted(tags)
+        self.rels = [self.bos] + sorted(rels)
 
         self.wtoi = {w: i for i, w in enumerate(self.words)}
         self.ctoi = {c: i for i, c in enumerate(self.chars)}
@@ -55,6 +62,19 @@ class Vocab():
 
         return char_ids
 
+    def word2bert(self, sequence, max_length=20):
+        subwords = torch.zeros(len(sequence)+1, max_length, dtype=torch.long)
+        seq = [self.tokenizer.tokenize(token) for token in sequence]
+        seq = [piece if piece else ['[PAD]'] for piece in seq]
+        # seq = [['[CLS]']] + seq + ['[SEP]']
+        seq = [['[CLS]']] + seq
+        for i, tokens in enumerate(seq):
+            ids = torch.tensor(
+                self.tokenizer.convert_tokens_to_ids(tokens[:max_length]))
+            subwords[i, :len(ids)] = ids
+
+        return subwords
+
     def tag2id(self, sequence):
         return torch.tensor([self.ttoi.get(tag, 0) for tag in sequence])
 
@@ -91,20 +111,21 @@ class Vocab():
         self.n_chars = len(self.chars)
 
     def numericalize(self, corpus, training=True):
-        words = [self.word2id(seq) for seq in corpus.words]
-        chars = [self.char2id(seq) for seq in corpus.words]
-        tags = [self.tag2id(seq) for seq in corpus.tags]
+        berts = [self.word2bert(seq) for seq in corpus.words]
+        words = [self.word2id([self.bos] + seq) for seq in corpus.words]
+        chars = [self.char2id([self.bos] + seq) for seq in corpus.words]
+        tags = [self.tag2id([self.bos] + seq) for seq in corpus.tags]
 
         if not training:
-            return words, chars, tags
+            return berts, words, chars, tags
 
-        arcs = [torch.tensor(seq) for seq in corpus.heads]
-        rels = [self.rel2id(seq) for seq in corpus.rels]
+        arcs = [torch.tensor([0] + seq) for seq in corpus.heads]
+        rels = [self.rel2id([self.bos] + seq) for seq in corpus.rels]
 
-        return words, chars, tags, arcs, rels
+        return berts, words, chars, tags, arcs, rels
 
-    @classmethod
-    def from_corpus(cls, corpus, min_freq=1):
+    @ classmethod
+    def from_corpus(cls, bert_vocab, corpus, min_freq=1):
         # 需要去重
         words = Counter(word.lower() for seq in corpus.words for word in seq)
         words = list(word for word, freq in words.items() if freq >= min_freq)
@@ -112,10 +133,10 @@ class Vocab():
         tags = list({tag for seq in corpus.tags for tag in seq})
         rels = list({rel for seq in corpus.rels for rel in seq})
 
-        vocab = cls(words, chars, tags, rels)
+        vocab = cls(bert_vocab, words, chars, tags, rels)
 
         return vocab
 
-    @classmethod
+    @ classmethod
     def is_punctuation(cls, word):
         return all(unicodedata.category(char).startswith('P') for char in word)

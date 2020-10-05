@@ -4,8 +4,8 @@ from dparser import Model, BiaffineParser
 from dparser.metrics import AttachmentMethod
 from dparser.utils import Corpus, Embedding, Vocab
 from dparser.utils.data import TextDataset, batchify
-from dparser.utils.log import log
 
+from dparser.utils.log import log
 import torch.distributed as dist
 from dparser.utils.parallel import is_master
 from dparser.utils.parallel import DistributedDataParallel as DDP
@@ -59,7 +59,6 @@ class Train():
         return subparser
 
     def __call__(self, config):
-
         if dist.is_initialized():
             config.batch_size = config.batch_size // dist.get_world_size()
 
@@ -68,7 +67,8 @@ class Train():
         test = Corpus.load(config.ftest)
         if config.preprocess or not os.path.exists(config.vocab):
             log('Preprocess the data')
-            vocab = Vocab.from_corpus(corpus=train, min_freq=2)
+            vocab = Vocab.from_corpus(
+                config.bert, corpus=train, min_freq=2)
             vocab.load_embedding(Embedding.load(config.fembed, config.unk))
             torch.save(vocab, config.vocab)
         else:
@@ -81,7 +81,8 @@ class Train():
             'n_tags': vocab.n_tags,
             'n_rels': vocab.n_rels,
             'pad_index': vocab.pad_index,
-            'unk_index': vocab.unk_index
+            'unk_index': vocab.unk_index,
+            'bos_index': vocab.bos_index,
         })
         log(vocab)
 
@@ -91,8 +92,8 @@ class Train():
         ds_test = TextDataset(vocab.numericalize(test), config.buckets)
 
         # set data loaders
-        dl_train = batchify(ds_train, config.batch_size, True,
-                            dist.is_initialized())
+        dl_train = batchify(ds_train, config.batch_size,
+                            True, dist.is_initialized())
         dl_dev = batchify(ds_dev, config.batch_size)
         dl_test = batchify(ds_test, config.batch_size)
         log(f"{'train:':6} {len(ds_train):5} sentences in total, "

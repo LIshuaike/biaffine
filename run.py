@@ -2,9 +2,11 @@ import os
 import torch
 import argparse
 from dparser.config import Config
-from dparser.utils.parallel import init_device
-from dparser.utils.log import log
 from dparser.cmds import Evaluate, Predict, Train
+
+from dparser.utils.log import log
+from dparser.utils.parallel import init_device
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
@@ -59,7 +61,7 @@ if __name__ == '__main__':
 
     torch.set_num_threads(args.threads)
     torch.manual_seed(args.seed)
-
+    
     init_device(args.device, args.local_rank)
     args.device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
