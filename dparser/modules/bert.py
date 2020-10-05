@@ -1,3 +1,4 @@
+import torch
 import torch.nn as nn
 from dparser.modules.scalar_mix import ScalarMix
 from torch.nn.utils.rnn import pad_sequence

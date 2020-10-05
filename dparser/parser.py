@@ -16,16 +16,17 @@ class BiaffineParser(nn.Module):
         self.pretrained = nn.Embedding.from_pretrained(embed)
         self.word_embed = nn.Embedding(num_embeddings=config.n_words,
                                        embedding_dim=config.n_embed)
-        self.char_embed = CHAR_LSTM(num_embeddings=config.n_chars,
-                                    embedding_dim=config.n_char_embed,
-                                    output_dim=config.n_embed)
-        self.bert_embed = BertEmbedding(model=config.bert,
-                                        n_layers=config.n_bert_layers,
-                                        n_out=config.n_feat_embed)
-        # config.n_feat_embed = self.feat_embed.n_out
-        # elif feat == 'pos':
-        #     self.feat_embed = nn.Embedding(num_embeddings=config.n_tags,
-        #                                    embedding_dim = config.n_pos_embed)
+        if feat == 'char':
+            self.feat_embed = CHAR_LSTM(num_embeddings=config.n_chars,
+                                        embedding_dim=config.n_char_embed,
+                                        output_dim=config.n_embed)
+        elif feat == 'bert':
+            self.feat_embed = BertEmbedding(model=config.bert,
+                                            n_layers=config.n_bert_layers,
+                                            n_out=config.n_bert_embed)
+        elif feat == 'pos':
+            self.feat_embed = nn.Embedding(num_embeddings=config.n_tags,
+                                           embedding_dim=config.n_pos_embed)
         self.embed_dropout = IndependentDropout(p=config.embed_dropout)
 
         # LSTM layer
@@ -69,7 +70,7 @@ class BiaffineParser(nn.Module):
     def reset_parameters(self):
         nn.init.zeros_(self.word_embed.weight)
 
-    def forward(self, berts, words, chars):
+    def forward(self, words, feats):
         batch_size, seq_len = words.shape
         mask = words.ne(self.pad_index)
         lens = mask.sum(dim=1)
@@ -79,9 +80,9 @@ class BiaffineParser(nn.Module):
 
         # get outputs from embedding layer
         word_embed = self.pretrained(words) + self.word_embed(ext_words)
-        word_embed = word_embed[:, :max(lens)] + self.bert_embed(*berts)
-        char_embed = self.feat_embed(chars)
-        embeds = self.embed_dropout(word_embed, char_embed)
+        # word_embed = word_embed[:, :max(lens)] + self.bert_embed(berts)
+        feat_embed = self.feat_embed(feats)
+        embeds = self.embed_dropout(word_embed, feat_embed)
         embed = torch.cat(embeds, dim=-1)
 
         # lstm

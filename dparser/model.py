@@ -22,8 +22,12 @@ class Model():
             mask = words.ne(self.vocab.pad_index)
             # ignore the first token of each sentence
             mask[:, 0] = 0
-            s_arc, s_rel = self.parser(berts, words, chars)
-
+            if self.config.feat == 'char':
+                s_arc, s_rel = self.parser(words, chars)
+            elif self.config.feat == 'bert':
+                s_arc, s_rel = self.parser(words, berts)
+            elif self.config.feat == 'pos':
+                s_arc, s_rel = self.parser(words, tags)
             loss = self.parser.get_loss(s_arc, s_rel, arcs, rels, mask)
             loss = loss / self.config.update_steps
             loss.backward()
@@ -45,7 +49,12 @@ class Model():
             mask = words.ne(self.vocab.pad_index)
             mask[:, 0] = 0
 
-            s_arc, s_rel = self.parser(berts, words, chars)
+            if self.config.feat == 'char':
+                s_arc, s_rel = self.parser(words, chars)
+            elif self.config.feat == 'bert':
+                s_arc, s_rel = self.parser(words, berts)
+            elif self.config.feat == 'pos':
+                s_arc, s_rel = self.parser(words, tags)
             loss += self.parser.get_loss(s_arc,
                                          s_rel,
                                          arcs,
@@ -75,7 +84,12 @@ class Model():
             mask = words.ne(self.vocab.pad_index)
             mask[:, 0] = 0
             lens = mask.sum(dim=1).tolist()
-            s_arc, s_rel = self.parser(berts, words, chars)
+            if self.config.feat == 'char':
+                s_arc, s_rel = self.parser(words, chars)
+            elif self.config.feat == 'bert':
+                s_arc, s_rel = self.parser(words, berts)
+            elif self.config.feat == 'pos':
+                s_arc, s_rel = self.parser(words, tags)
             s_arc, s_rel = s_arc[mask], s_rel[mask]
             pred_arcs, pred_rels = self.parser.decode(s_arc, s_rel, mask)
 

@@ -62,14 +62,6 @@ def kmeans(x, k):
     return centroids, clusters
 
 
-# def collate_fn(data):
-#     reprs = (pad_sequence(i, True) for i in zip(*data))
-#     if torch.cuda.is_available():
-#         reprs = (i.cuda() for i in reprs)
-
-#     return reprs
-
-
 class TextSampler(Sampler):
     def __init__(self,
                  buckets,
@@ -81,12 +73,6 @@ class TextSampler(Sampler):
         self.shuffle = shuffle
         self.sizes, self.buckets = zip(*[(size, bucket)
                                          for size, bucket in buckets.items()])
-        # # number of chunks in each bucket
-        # self.chunks = [
-        #     max(round(size * len(bucket) / min(max_len * size, batch_size)), 1)
-        #     for size, bucket in zip(self.sizes, self.buckets)
-        # ]
-
         # number of chunks in each bucket, clipped by range(1, len(bucket))
         self.chunks = [
             min(len(bucket), max(round(size * len(bucket) / batch_size), 1))
@@ -125,7 +111,6 @@ class TextSampler(Sampler):
 
     def __len__(self):
         return self.samples
-        # return sum(self.chunks)
 
 
 class TextDataset(Dataset):
@@ -147,27 +132,13 @@ class TextDataset(Dataset):
     def buckets(self):
         return dict(zip(self.centroids, self.clusters))
 
-    @classmethod
-    def collate_fn(cls, batch):
-        return (field for field in zip(*batch))
 
+def collate_fn(data):
+    reprs = (pad_sequence(i, True) for i in zip(*data))
+    if torch.cuda.is_available():
+        reprs = (i.cuda() for i in reprs)
 
-class TextDataLoader(DataLoader):
-
-    def __init__(self, *args, **kwargs):
-        super(TextDataLoader, self).__init__(*args, **kwargs)
-
-    def __iter__(self):
-        for raw_batch in super(TextDataLoader, self).__iter__():
-            batch, device = [], 'cuda' if torch.cuda.is_available() else 'cpu'
-            for data in raw_batch:
-                if isinstance(data[0], torch.Tensor):
-                    data = pad_sequence(data, True).to(device)
-                elif isinstance(data[0], Iterable):
-                    data = [pad_sequence(f, True).to(device)
-                            for f in zip(*data)]
-                batch.append(data)
-            yield batch
+    return reprs
 
 
 def batchify(dataset, batch_size, shuffle=False, distributed=False):
@@ -175,7 +146,7 @@ def batchify(dataset, batch_size, shuffle=False, distributed=False):
                                 batch_size=batch_size,
                                 shuffle=shuffle,
                                 distributed=distributed)
-    loader = TextDataLoader(dataset=dataset,
-                            batch_sampler=batch_sampler,
-                            collate_fn=TextDataset.collate_fn)
+    loader = DataLoader(dataset=dataset,
+                        batch_sampler=batch_sampler,
+                        collate_fn=collate_fn)
     return loader

@@ -4,8 +4,8 @@ from dparser import Model, BiaffineParser
 from dparser.metrics import AttachmentMethod
 from dparser.utils import Corpus, Embedding, Vocab
 from dparser.utils.data import TextDataset, batchify
-from dparser.utils.log import log
 
+from dparser.utils.log import log
 import torch.distributed as dist
 from dparser.utils.parallel import is_master
 from dparser.utils.parallel import DistributedDataParallel as DDP
@@ -21,11 +21,11 @@ np.random.seed(0)
 class Train():
     def add_subparser(self, name, parser):
         subparser = parser.add_parser(name, help='Train a model')
-        # subparser.add_argument('--feat',
-        #                        '-f',
-        #                        default='char',
-        #                        choices=['pos', 'char', 'bert'],
-        #                        help='choices of additional features')
+        subparser.add_argument('--feat',
+                               '-f',
+                               default='char',
+                               choices=['pos', 'char', 'bert'],
+                               help='choices of additional features')
         subparser.add_argument('--buckets',
                                default=64,
                                type=int,
@@ -59,7 +59,6 @@ class Train():
         return subparser
 
     def __call__(self, config):
-
         if dist.is_initialized():
             config.batch_size = config.batch_size // dist.get_world_size()
 
@@ -93,9 +92,8 @@ class Train():
         ds_test = TextDataset(vocab.numericalize(test), config.buckets)
 
         # set data loaders
-        dl_train = batchify(ds_train, config.batch_size, True,
-                            dist.is_initialized())
-        # dl_train = batchify(ds_train, config.batch_size, True)
+        dl_train = batchify(ds_train, config.batch_size,
+                            True, dist.is_initialized())
         dl_dev = batchify(ds_dev, config.batch_size)
         dl_test = batchify(ds_test, config.batch_size)
         log(f"{'train:':6} {len(ds_train):5} sentences in total, "
